@@ -1,0 +1,25 @@
+﻿<Page
+    x:Class="webFilesUno.MainPage"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+
+    <NavigationView x:Name="NavView" PaneDisplayMode="Top">
+        <NavigationView.MenuItems>
+            <NavigationViewItem Content="Downloads" Icon="Download" Tag="download" />
+            <NavigationViewItem Content="De-Duplication" Icon="Copy" Tag="dedupe" />
+            <NavigationViewItem Content="Image Compression" Icon="Pictures" Tag="compress" />
+        </NavigationView.MenuItems>
+
+        <Grid Padding="20">
+            <StackPanel x:Name="CompressionPanel" Visibility="Collapsed">
+                <TextBlock Text="Image Quality" />
+                <Slider x:Name="QualitySlider" 
+                        Minimum="1" Maximum="100" 
+                        Value="80" />
+                <Button x:Name="StartConvertButton" 
+                        Content="Start Image Conversion" 
+                        />
+            </StackPanel>
+        </Grid>
+    </NavigationView>
+</Page>

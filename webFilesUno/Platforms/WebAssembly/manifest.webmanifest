@@ -1,0 +1,10 @@
+{
+  "background_color": "#ffffff",
+  "description": "webFilesUno",
+  "display": "standalone",
+  "name": "webFilesUno",
+  "short_name": "webFilesUno",
+  "start_url": "/index.html",
+  "theme_color": "#ffffff",
+  "scope": "/"
+}
