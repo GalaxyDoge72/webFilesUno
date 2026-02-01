@@ -76,7 +76,7 @@ public sealed partial class MainPage : Page
     private async void startDownload_Click(object sender, RoutedEventArgs e)
     {
         string url = kemonoLinkTextBox.Text.Trim();
-        string baseUrl = (BaseUrlComboBox.SelectedItem as ComboBoxItem)?.Content.ToString() ?? "https://kemono.cr";
+        BASE_URL = (BaseUrlComboBox.SelectedItem as ComboBoxItem)?.Content.ToString() ?? "https://kemono.cr";
         string customFolderName = folderNameTextBox.Text.Trim();
         _semaphore = new SemaphoreSlim((int)maxDownloadsBar.Value);
 
@@ -95,8 +95,8 @@ public sealed partial class MainPage : Page
 
         Match match = BaseUrlComboBox.SelectedItem.ToString() switch
         {
-            "kemono.cr" => Regex.Match(url, @"kemono\.cr/([^/]+)/(?:user|creator)/([^/\?]+)", RegexOptions.IgnoreCase),
-            "coomer.st" => Regex.Match(url, @"kemono\.cr/([^/]+)/(?:user|creator)/([^/\?]+)", RegexOptions.IgnoreCase),
+            "https://kemono.cr" => Regex.Match(url, @"kemono\.cr/([^/]+)/(?:user|creator)/([^/\?]+)", RegexOptions.IgnoreCase),
+            "https://coomer.st" => Regex.Match(url, @"kemono\.cr/([^/]+)/(?:user|creator)/([^/\?]+)", RegexOptions.IgnoreCase),
             _ => Regex.Match(url, @"kemono\.cr/([^/]+)/(?:user|creator)/([^/\?]+)", RegexOptions.IgnoreCase),
         };
 
@@ -128,7 +128,6 @@ public sealed partial class MainPage : Page
         try
         {
             await fetchAndProcessPosts(service, userId, creatorDir);
-            updateStatusLabel("Finished.");
         }
         catch (OperationCanceledException)
         {
@@ -165,7 +164,7 @@ public sealed partial class MainPage : Page
             "m4a" => mFourACheckBox.IsChecked ?? false,
             "flac" => flacCheckBox.IsChecked ?? false,
             "ogg" => oggCheckBox.IsChecked ?? false,
-            _ => false // Default for unknown extensions
+            _ => NoThumbnailCheckBox.IsChecked ?? false, // Re-using this because it doesn't work usually.
         };
     }
 
@@ -173,6 +172,10 @@ public sealed partial class MainPage : Page
     {
         int offset = 0;
         bool hasMore = true;
+        int processedCount = 0;
+        
+        // In many Kemono-like APIs, you might need a separate call to get the total, 
+        // but usually, we can track progress relative to the current batch.
         
         while (hasMore)
         {
@@ -182,22 +185,34 @@ public sealed partial class MainPage : Page
 
             string rawBody = await response.Content.ReadAsStringAsync();
             var posts = JsonSerializer.Deserialize<List<KemonoPost>>(rawBody,
-            new JsonSerializerOptions {PropertyNameCaseInsensitive = true});
+                new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
 
             if (posts == null || posts.Count == 0) break;
 
-            var postTasks = posts.Select(post => QueuePostDownloads(post, creatorDir));
-            await Task.WhenAll(postTasks);
+            // Process each post one by one (or in parallel) and update the label
+            foreach (var post in posts)
+            {
+                processedCount++;
+                
+                // Update the InfoBar at the bottom
+                // We use the offset + current count to show progress
+                updateStatusLabel($"Processing post {processedCount} (Page offset: {offset})...");
+                
+                await QueuePostDownloads(post, creatorDir);
+            }
             
             if (posts.Count < 50) hasMore = false;
             else
             {
                 offset += 50;
-                await Task.Delay(500);
+                await Task.Delay(500); // Respectful delay between API pages
             }
         }
+        
+        updateStatusLabel($"Finished! Fetched {processedCount} posts.");
     }
-
+    int totalDownloadCount = 0;
+    int downloadedCount = 0;
     private async Task QueuePostDownloads(KemonoPost post, string creatorDir)
     {
         // We cap the title strictly. ID is added to ensure uniqueness even if titles are truncated.
@@ -248,6 +263,7 @@ public sealed partial class MainPage : Page
             foreach (var (url, name) in filesToDownload)
             {
                 string destinationPath = Path.Combine(longPostDir, name);
+                totalDownloadCount++;
                 _ = downloadFileWithBarAsync(url, destinationPath, name);
             }
         }
@@ -257,6 +273,8 @@ public sealed partial class MainPage : Page
     {
         try { await _semaphore.WaitAsync(); }
         catch (Exception) { return; }
+        
+        
 
         // Create the ViewModel and add to UI via the collection
         var downloadVm = new DownloadItemViewModel { FileName = fileName, Percent = 0, StatusText = "Starting..." };
@@ -266,6 +284,7 @@ public sealed partial class MainPage : Page
 
         try
         {
+            StartDownloadButton.IsEnabled = false;
             using var response = await _client.GetAsync(url, HttpCompletionOption.ResponseHeadersRead);
             response.EnsureSuccessStatusCode();
 
@@ -279,17 +298,19 @@ public sealed partial class MainPage : Page
             var sw = Stopwatch.StartNew();
             long lastUpdateTick = 0;
 
+            
+
             while ((read = await stream.ReadAsync(buffer)) > 0)
             {
                 await fileStream.WriteAsync(buffer.AsMemory(0, read));
                 readTotal += read;
 
                 // Update UI every 250ms to prevent lag
-                if (sw.ElapsedMilliseconds - lastUpdateTick > 250)
+                if (sw.ElapsedMilliseconds - lastUpdateTick > 150)
                 {
                     lastUpdateTick = sw.ElapsedMilliseconds;
                     double speed = readTotal / sw.Elapsed.TotalSeconds;
-                    int percent = totalBytes > 0 ? (int)((readTotal * 100) / totalBytes) : 0;
+                    int percent = totalBytes > 0 ? (int)(readTotal * 100 / totalBytes) : 0;
 
                     this.DispatcherQueue.TryEnqueue(() => {
                         downloadVm.Percent = percent;
@@ -297,6 +318,9 @@ public sealed partial class MainPage : Page
                     });
                 }
             }
+            downloadedCount++;
+            updateStatusLabel($"Downloaded {downloadedCount} of {totalDownloadCount} attachments.");
+
         }
         catch (Exception ex) { Debug.WriteLine($"Download error: {ex.Message}"); }
         finally
@@ -304,6 +328,7 @@ public sealed partial class MainPage : Page
             // Remove from UI collection when finished
             this.DispatcherQueue.TryEnqueue(() => ActiveDownloads.Remove(downloadVm));
             _semaphore.Release();
+            StartDownloadButton.IsEnabled = true;
         }
     }
 

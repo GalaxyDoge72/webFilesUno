@@ -165,3 +165,9 @@ csharp_style_expression_bodied_indexers = true:silent
 csharp_style_expression_bodied_accessors = true:silent
 csharp_style_expression_bodied_lambdas = true:silent
 csharp_style_expression_bodied_local_functions = false:silent
+
+# IDE1006: Naming Styles
+dotnet_diagnostic.IDE1006.severity = none
+
+# CS8618: Non-nullable field must contain a non-null value when exiting constructor. Consider adding the 'required' modifier or declaring as nullable.
+dotnet_diagnostic.CS8618.severity = none

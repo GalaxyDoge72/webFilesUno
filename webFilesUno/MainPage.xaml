@@ -34,8 +34,8 @@
 
                         <TextBlock Text="Base URL:" VerticalAlignment="Center" Grid.Row="0" Grid.Column="0"/>
                         <ComboBox x:Name="BaseUrlComboBox" Grid.Row="0" Grid.Column="1" Grid.ColumnSpan="3" HorizontalAlignment="Stretch">
-                            <ComboBoxItem Content="kemono.cr" IsSelected="True"/>
-                            <ComboBoxItem Content="coomer.st"/>
+                            <ComboBoxItem Content="https://kemono.cr" IsSelected="True"/>
+                            <ComboBoxItem Content="https://coomer.st"/>
                         </ComboBox>
 
                         <TextBlock Text="Link:" VerticalAlignment="Center" Grid.Row="1" Grid.Column="0"/>
@@ -82,10 +82,10 @@
 
                     <Grid ColumnDefinitions="*, Auto" HorizontalAlignment="Stretch">
                         <StackPanel Grid.Column="0" MaxWidth="300" HorizontalAlignment="Left">
-                            <TextBlock x:Name="maxDownloadsLabel" Text="Max Downloads: 4"/>
+                            <TextBlock x:Name="maxDownloadsLabel" Text="{x:Bind x:String.Format('Max Downloads: {0}', maxDownloadsBar.Value), Mode=OneWay}"/>/>
                             <Slider x:Name="maxDownloadsBar" Minimum="1" Maximum="10" Value="4" TickFrequency="1" HorizontalAlignment="Stretch"/>
                         </StackPanel>
-                        <CheckBox x:Name="NoThumbnailCheckBox" Content="Skip Thumbnails" Grid.Column="1" VerticalAlignment="Bottom"/>
+                        <CheckBox x:Name="NoThumbnailCheckBox" Content="Download unknown files" Grid.Column="1" VerticalAlignment="Bottom"/>
                     </Grid>
 
                     <Button x:Name="StartDownloadButton" 
