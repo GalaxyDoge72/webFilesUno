@@ -1,7 +1,11 @@
 using System.ComponentModel.DataAnnotations;
+using System.Dynamic;
+using System.Reflection.Emit;
 using System.Text.Json;
 using System.Text.RegularExpressions;
 using Windows.UI.Popups;
+using System.Collections.ObjectModel;
+using System.Diagnostics;
 
 namespace webFilesUno;
 
@@ -18,11 +22,15 @@ public sealed partial class MainPage : Page
     private string BASE_URL = "https://kemono.cr";
     private const string API_VERSION = "api/v1";
 
+    public ObservableCollection<DownloadItemViewModel> ActiveDownloads {get;} = new();
+
     public MainPage()
     {
         this.InitializeComponent();
         _client.DefaultRequestHeaders.Add("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64)");
         _client.DefaultRequestHeaders.Add("Accept", "text/css");
+
+        flowLayoutPanelDownloads.ItemsSource = ActiveDownloads;
     }
 
     #region Path Helpers
@@ -53,12 +61,24 @@ public sealed partial class MainPage : Page
         });
     }
 
+    private string FormatBytesPerSecond(double bytes)
+    {
+        string[] units = { "B/s", "KB/s", "MB/s", "GB/s" };
+        int unitIndex = 0;
+        while (bytes >= 1024 && unitIndex < units.Length - 1)
+        {
+            bytes /= 1024;
+            unitIndex++;
+        }
+        return $"{bytes:F2} {units[unitIndex]}";
+    }
+
     private async void startDownload_Click(object sender, RoutedEventArgs e)
     {
         string url = kemonoLinkTextBox.Text.Trim();
         string baseUrl = (BaseUrlComboBox.SelectedItem as ComboBoxItem)?.Content.ToString() ?? "https://kemono.cr";
         string customFolderName = folderNameTextBox.Text.Trim();
-        _semaphore = new SemaphoreSlim(5);
+        _semaphore = new SemaphoreSlim((int)maxDownloadsBar.Value);
 
 
         if (string.IsNullOrEmpty(url))
@@ -125,29 +145,29 @@ public sealed partial class MainPage : Page
     }
     
     private bool shouldDownload(string fileName)
-{
-    string ext = Path.GetExtension(fileName).ToLowerInvariant().TrimStart('.');
-    return ext switch
     {
-        // Add "?? false" to every CheckBox reference
-        "jpg" or "jpeg" => jpegCheckBox.IsChecked ?? false,
-        "png" => pngCheckBox.IsChecked ?? false,
-        "mp4" => mpegCheckBox.IsChecked ?? false,
-        "mov" => movCheckBox.IsChecked ?? false,
-        "webm" => webmCheckBox.IsChecked ?? false,
-        "gif" => gifCheckBox.IsChecked ?? false,
-        "psd" => psdCheckBox.IsChecked ?? false,
-        "zip" => zipCheckBox.IsChecked ?? false,
-        "rar" => rarCheckBox.IsChecked ?? false,
-        "7z" => sevenZipCheckBox.IsChecked ?? false,
-        "mp3" => mpegAudioCheckBox.IsChecked ?? false,
-        "wav" => wavCheckBox.IsChecked ?? false,
-        "m4a" => mFourACheckBox.IsChecked ?? false,
-        "flac" => flacCheckBox.IsChecked ?? false,
-        "ogg" => oggCheckBox.IsChecked ?? false,
-        _ => false // Default for unknown extensions
-    };
-}
+        string ext = Path.GetExtension(fileName).ToLowerInvariant().TrimStart('.');
+        return ext switch
+        {
+            // Add "?? false" to every CheckBox reference
+            "jpg" or "jpeg" => jpegCheckBox.IsChecked ?? false,
+            "png" => pngCheckBox.IsChecked ?? false,
+            "mp4" => mpegCheckBox.IsChecked ?? false,
+            "mov" => movCheckBox.IsChecked ?? false,
+            "webm" => webmCheckBox.IsChecked ?? false,
+            "gif" => gifCheckBox.IsChecked ?? false,
+            "psd" => psdCheckBox.IsChecked ?? false,
+            "zip" => zipCheckBox.IsChecked ?? false,
+            "rar" => rarCheckBox.IsChecked ?? false,
+            "7z" => sevenZipCheckBox.IsChecked ?? false,
+            "mp3" => mpegAudioCheckBox.IsChecked ?? false,
+            "wav" => wavCheckBox.IsChecked ?? false,
+            "m4a" => mFourACheckBox.IsChecked ?? false,
+            "flac" => flacCheckBox.IsChecked ?? false,
+            "ogg" => oggCheckBox.IsChecked ?? false,
+            _ => false // Default for unknown extensions
+        };
+    }
 
     private async Task fetchAndProcessPosts(string service, string userId, string creatorDir)
     {
@@ -228,9 +248,65 @@ public sealed partial class MainPage : Page
             foreach (var (url, name) in filesToDownload)
             {
                 string destinationPath = Path.Combine(longPostDir, name);
+                _ = downloadFileWithBarAsync(url, destinationPath, name);
             }
         }
     }
+
+    private async Task downloadFileWithBarAsync(string url, string destinationPath, string fileName)
+    {
+        try { await _semaphore.WaitAsync(); }
+        catch (Exception) { return; }
+
+        // Create the ViewModel and add to UI via the collection
+        var downloadVm = new DownloadItemViewModel { FileName = fileName, Percent = 0, StatusText = "Starting..." };
+        
+        // UI updates must happen on the Dispatcher thread
+        this.DispatcherQueue.TryEnqueue(() => ActiveDownloads.Add(downloadVm));
+
+        try
+        {
+            using var response = await _client.GetAsync(url, HttpCompletionOption.ResponseHeadersRead);
+            response.EnsureSuccessStatusCode();
+
+            long totalBytes = response.Content.Headers.ContentLength ?? -1;
+            using var stream = await response.Content.ReadAsStreamAsync();
+            using var fileStream = new FileStream(destinationPath, FileMode.Create, FileAccess.Write, FileShare.None, 4096, true);
+
+            byte[] buffer = new byte[8192];
+            long readTotal = 0;
+            int read;
+            var sw = Stopwatch.StartNew();
+            long lastUpdateTick = 0;
+
+            while ((read = await stream.ReadAsync(buffer)) > 0)
+            {
+                await fileStream.WriteAsync(buffer.AsMemory(0, read));
+                readTotal += read;
+
+                // Update UI every 250ms to prevent lag
+                if (sw.ElapsedMilliseconds - lastUpdateTick > 250)
+                {
+                    lastUpdateTick = sw.ElapsedMilliseconds;
+                    double speed = readTotal / sw.Elapsed.TotalSeconds;
+                    int percent = totalBytes > 0 ? (int)((readTotal * 100) / totalBytes) : 0;
+
+                    this.DispatcherQueue.TryEnqueue(() => {
+                        downloadVm.Percent = percent;
+                        downloadVm.StatusText = $"{percent}% - {FormatBytesPerSecond(speed)}";
+                    });
+                }
+            }
+        }
+        catch (Exception ex) { Debug.WriteLine($"Download error: {ex.Message}"); }
+        finally
+        {
+            // Remove from UI collection when finished
+            this.DispatcherQueue.TryEnqueue(() => ActiveDownloads.Remove(downloadVm));
+            _semaphore.Release();
+        }
+    }
+
     #endregion
 
     
