@@ -6,7 +6,7 @@
     xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
     mc:Ignorable="d">
 
-    <NavigationView x:Name="NavView" PaneDisplayMode="Left" IsSettingsVisible="False">
+    <NavigationView x:Name="NavView" PaneDisplayMode="Left" IsSettingsVisible="False" ItemInvoked="NavItemInvoked">
         <NavigationView.MenuItems>
             <NavigationViewItem Content="Downloads" Icon="Download" Tag="download" />
             <NavigationViewItem Content="Extraction" Icon="SaveLocal" Tag="extraction" />
@@ -97,7 +97,46 @@
                     
                     <InfoBar x:Name="StatusInfoBar" Title="Status" Message="Inactive" IsOpen="True" IsClosable="False" HorizontalAlignment="Stretch" />
                 </StackPanel>
+                <StackPanel x:Name="ExtractionSection" Spacing="15" HorizontalAlignment="Stretch" Visibility="Collapsed">
+                    <Grid HorizontalAlignment="Stretch">
+                        <TextBlock Text="Archive Extraction" FontSize="28" FontWeight="Bold" Foreground="{ThemeResource SystemAccentColor}"/>
+                    </Grid>
 
+                    <Grid ColumnSpacing="12">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="220" />
+                        </Grid.ColumnDefinitions>
+
+                        <ListView x:Name="archiveFilesListView" 
+                                Height="450" 
+                                Header="Found Archives"
+                                BorderThickness="1" 
+                                BorderBrush="{ThemeResource SystemControlForegroundBaseLowBrush}"
+                                Background="{ThemeResource SystemControlBackgroundAltMediumLowBrush}"
+                                CornerRadius="8">
+                            <ListView.ItemTemplate>
+                                <DataTemplate>
+                                    <TextBlock Text="{Binding fileName}" Margin="5,2" VerticalAlignment="Center"/>
+                                </DataTemplate>
+                            </ListView.ItemTemplate>
+                        </ListView>
+
+                        <StackPanel Grid.Column="1" Spacing="12">
+                            <Button x:Name="scanButton" Content="Scan Directory" HorizontalAlignment="Stretch"/>
+                            <Button x:Name="extractButton" Content="Extract All" 
+                                    Style="{StaticResource AccentButtonStyle}" HorizontalAlignment="Stretch"/>
+                            
+                            <CheckBox x:Name="extractOverwriteCheckBox" Content="Overwrite Existing" IsChecked="True" />
+                            
+                            <InfoBar x:Name="ExtractionStatusInfoBar" 
+                                    Title="Extraction Status" 
+                                    Message="Ready" 
+                                    IsOpen="True" 
+                                    IsClosable="False" />
+                        </StackPanel>
+                    </Grid>
+                </StackPanel>
                 <ItemsControl x:Name="flowLayoutPanelDownloads" HorizontalAlignment="Stretch">
                     <ItemsControl.ItemTemplate>
                         <DataTemplate>

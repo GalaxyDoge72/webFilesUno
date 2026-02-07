@@ -33,6 +33,20 @@ public sealed partial class MainPage : Page
         flowLayoutPanelDownloads.ItemsSource = ActiveDownloads;
     }
 
+    #region UI Controllers
+
+    private void NavItemInvoked(NavigationView sender, NavigationViewItemInvokedEventArgs args)
+    {
+        var tag = args.InvokedItemContainer.Tag.ToString();
+
+        DownloadSection.Visibility = (tag == "download") ? Visibility.Visible : Visibility.Collapsed;
+        ExtractionSection.Visibility = (tag == "extraction") ? Visibility.Visible : Visibility.Collapsed;
+
+        flowLayoutPanelDownloads.Visibility = (tag == "download") ? Visibility.Visible : Visibility.Collapsed;
+    }
+
+    #endregion
+
     #region Path Helpers
 
     private static string sanitizeAndCap(string name, int maxLen)
