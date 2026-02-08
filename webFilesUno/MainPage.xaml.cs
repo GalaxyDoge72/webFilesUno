@@ -6,6 +6,7 @@ using System.Text.RegularExpressions;
 using Windows.UI.Popups;
 using System.Collections.ObjectModel;
 using System.Diagnostics;
+using SharpCompress.Archives;
 
 namespace webFilesUno;
 
@@ -41,6 +42,7 @@ public sealed partial class MainPage : Page
 
         DownloadSection.Visibility = (tag == "download") ? Visibility.Visible : Visibility.Collapsed;
         ExtractionSection.Visibility = (tag == "extraction") ? Visibility.Visible : Visibility.Collapsed;
+        DeDupeSection.Visibility = (tag == "dedupe") ? Visibility.Visible : Visibility.Collapsed;
 
         flowLayoutPanelDownloads.Visibility = (tag == "download") ? Visibility.Visible : Visibility.Collapsed;
     }
@@ -348,8 +350,233 @@ public sealed partial class MainPage : Page
 
     #endregion
 
-    
+    #region Extraction Tab Logic
 
+    private async void scanButton_Click(object sender, RoutedEventArgs e)
+    {
+        // Uno/WinUI uses FolderPicker instead of FolderBrowserDialog
+        var picker = new Windows.Storage.Pickers.FolderPicker();
+        picker.FileTypeFilter.Add("*");
+
+        if (App.MainWindow != null)
+        {
+            var hwnd = WinRT.Interop.WindowNative.GetWindowHandle(App.MainWindow);
+            WinRT.Interop.InitializeWithWindow.Initialize(picker, hwnd);
+        }
+
+        var folder = await picker.PickSingleFolderAsync();
+        if (folder != null)
+        {
+            string selectedPath = folder.Path;
+            string[] extensions = { ".zip", ".rar", ".7z", ".tar" };
+
+            archiveFilesListView.Items.Clear();
+            scanButton.IsEnabled = false;
+            extractButton.IsEnabled = false;
+            ExtractionStatusInfoBar.Message = "Scanning directory...";
+
+            try
+            {
+                // Ported scanning logic from Form1.cs
+                var foundFiles = await Task.Run(() =>
+                {
+                    var results = new List<extractionFileEntry>();
+                    var files = Directory.EnumerateFiles(selectedPath, "*.*", SearchOption.AllDirectories)
+                        .Where(file => extensions.Contains(Path.GetExtension(file).ToLower()));
+
+                    foreach (var filePath in files)
+                    {
+                        results.Add(new extractionFileEntry
+                        {
+                            fileName = Path.GetFileName(filePath),
+                            path = filePath
+                        });
+                    }
+                    return results;
+                });
+
+                foreach (var entry in foundFiles)
+                {
+                    archiveFilesListView.Items.Add(entry);
+                }
+                ExtractionStatusInfoBar.Message = $"Found {foundFiles.Count} archives.";
+            }
+            catch (Exception ex)
+            {
+                ExtractionStatusInfoBar.Message = $"Scan error: {ex.Message}";
+                ExtractionStatusInfoBar.Severity = InfoBarSeverity.Error;
+            }
+            finally
+            {
+                scanButton.IsEnabled = true;
+                extractButton.IsEnabled = true;
+            }
+        }
+    }
+
+    private async void extractButton_Click(object sender, RoutedEventArgs e)
+    {
+        extractButton.IsEnabled = false;
+        scanButton.IsEnabled = false;
+
+        // Get items from the ListView
+        var entries = archiveFilesListView.Items.Cast<extractionFileEntry>().ToList();
+        bool overwrite = extractOverwriteCheckBox.IsChecked ?? true;
+        int archiveCount = entries.Count;
+        int currentCount = 0;
+
+        await Task.Run(() =>
+        {
+            foreach (var entry in entries)
+            {
+                try
+                {
+                    string currentFolder = Path.GetDirectoryName(entry.path);
+                    // Using your SanitizeAndCap helper from Form1.cs
+                    string folderName = sanitizeAndCap(Path.GetFileNameWithoutExtension(entry.path), 50);
+                    string destinationPath = Path.Combine(currentFolder, folderName);
+
+                    if (!Directory.Exists(destinationPath)) Directory.CreateDirectory(destinationPath);
+
+                    this.DispatcherQueue.TryEnqueue(() =>
+                    {
+                        ExtractionStatusInfoBar.Title = "Extracting...";
+                        ExtractionStatusInfoBar.Message = $"Processing: {entry.fileName} ({currentCount + 1}/{archiveCount})";
+                    });
+
+                    // Extraction logic using SharpCompress
+                    using (var archive = ArchiveFactory.Open(entry.path))
+                    {
+                        foreach (var archiveEntry in archive.Entries.Where(x => !x.IsDirectory))
+                        {
+                            archiveEntry.WriteToDirectory(destinationPath, new SharpCompress.Common.ExtractionOptions()
+                            {
+                                ExtractFullPath = true,
+                                Overwrite = overwrite
+                            });
+                        }
+                    }
+                    
+                    // Cleanup: Delete archive after successful extraction
+                    File.Delete(entry.path);
+                    currentCount++;
+                }
+                catch (Exception ex)
+                {
+                    this.DispatcherQueue.TryEnqueue(() => 
+                        Debug.WriteLine($"Error processing {entry.fileName}: {ex.Message}"));
+                }
+            }
+        });
+
+        archiveFilesListView.Items.Clear();
+        extractButton.IsEnabled = true;
+        scanButton.IsEnabled = true;
+        ExtractionStatusInfoBar.Title = "Done";
+        ExtractionStatusInfoBar.Message = "Extraction and cleanup complete!";
+        ExtractionStatusInfoBar.Severity = InfoBarSeverity.Success;
+    }
+
+    #endregion
+
+    #region De-Duplication Tab
+
+    private void hashTypeComboBox_SelectionChanged(object sender, SelectionChangedEventArgs e)
+    {
+        if (hashTypeComboBox.SelectedItem is ComboBoxItem item)
+        {
+            string selected = item.Content.ToString();
+
+            hashDescriptionTextBox.Text = selected switch
+            {
+                "MD5" => "Fastest hash, but capable of being duplicated.",
+                "SHA-1" => "More expensive but fewer duplicates than MD5.",
+                "SHA-256" => "The gold standard; very slow but no duplicates.",
+                "XXHash64" => "Extremely fast, processing at RAM speeds.",
+                _ => ""
+            };
+        }
+    }
+
+    private async void scanDupeButton_Click(object sender, RoutedEventArgs e)
+    {
+        var picker = new Windows.Storage.Pickers.FolderPicker();
+        picker.FileTypeFilter.Add("*");
+
+        var hwnd = WinRT.Interop.WindowNative.GetWindowHandle(App.MainWindow);
+        WinRT.Interop.InitializeWithWindow.Initialize(picker, hwnd);
+
+        var folder = await picker.PickSingleFolderAsync();
+        if (folder == null) return;
+
+        scanDupeButton.IsEnabled = false;
+        string selectedAlgo = (hashTypeComboBox.SelectedItem as ComboBoxItem).Content.ToString();
+        bool isDryRun = dryRunCheckBox.IsChecked ?? false;
+        var greenBrush = new Microsoft.UI.Xaml.Media.SolidColorBrush(Microsoft.UI.Colors.Green);
+        var redBrush = new Microsoft.UI.Xaml.Media.SolidColorBrush(Microsoft.UI.Colors.Red);
+        await Task.Run(async () =>
+        {
+            var knownHashes = new System.Collections.Concurrent.ConcurrentDictionary<string, string>();
+            var files = Directory.GetFiles(folder.Path, "*.*", SearchOption.AllDirectories);
+            int processed = 0;
+
+            foreach (var filePath in files)
+            {
+                string hash = getFileHash(filePath, selectedAlgo);
+                bool isDupe = !knownHashes.TryAdd(hash, filePath);
+
+                
+
+                
+                if (isDupe && !isDryRun)
+                {
+                    try { File.Delete(filePath);} catch {}
+                }
+                else if (isDupe)
+                {
+                    var newItem = new DupeItemViewModel
+                    {
+                        FileName = Path.GetFileName(filePath),
+                        Hash = hash,
+                        Status = isDupe ? (isDryRun ? "[DUPE] Would Delete" : "[DUPE] Deleted") : "Unique",
+                        StatusColor = isDupe ? redBrush : greenBrush
+                    };
+
+                    dupeListView.Items.Add(newItem);
+                    dupeListView.ScrollIntoView(newItem);
+                }
+                processed++;
+                this.DispatcherQueue.TryEnqueue(() =>
+                {
+                    totalProgressBarDeDupe.Value = (processed * 100) / files.Length;
+                    deDupeStatusLabel.Text = $"Processed {processed}/{files.Length}";
+                });
+            }
+        });
+    }
+
+    private string getFileHash(string filePath, string algo)
+    {
+        if (algo == "XXHash64")
+        {
+            var hasher = new System.IO.Hashing.XxHash64();
+            using var fs = File.OpenRead(filePath);
+            hasher.Append(fs);
+            return BitConverter.ToString(hasher.GetCurrentHash()).Replace("-", "").ToLower();
+        }
+
+        using var crypto = algo switch
+        {
+            "SHA-256" => (System.Security.Cryptography.HashAlgorithm)System.Security.Cryptography.SHA256.Create(),
+            "SHA-1" => System.Security.Cryptography.SHA1.Create(),
+            _ => System.Security.Cryptography.MD5.Create()
+        };
+
+        using var stream = File.OpenRead(filePath);
+        return BitConverter.ToString(crypto.ComputeHash(stream)).Replace("-", "").ToLower();
+    }
+
+    #endregion
 }
 
 #region Models
@@ -372,5 +599,17 @@ public class KemonoPost
     public string title {get; set;} 
     public KemonoFile file {get; set;} = new KemonoFile();
     public List<KemonoFile> attachments {get; set;} = new List<KemonoFile>();
+}
+
+public class DupeItemViewModel : System.ComponentModel.INotifyPropertyChanged
+{
+    public string FileName { get; set; }
+    public string Hash { get; set; }
+    public string Status { get; set; }
+    
+    // This determines the color in the UI
+    public Microsoft.UI.Xaml.Media.SolidColorBrush StatusColor { get; set; }
+
+    public event System.ComponentModel.PropertyChangedEventHandler PropertyChanged;
 }
 #endregion

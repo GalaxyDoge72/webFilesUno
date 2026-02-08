@@ -25,5 +25,9 @@
       SkiaRenderer;
     </UnoFeatures>
   </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="SharpCompress" />
+    <PackageReference Include="System.IO.Hashing" />
+  </ItemGroup>
 
 </Project>
